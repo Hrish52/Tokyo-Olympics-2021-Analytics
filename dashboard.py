@@ -7,10 +7,7 @@ import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from openai import OpenAI
 import os
-import json
-import re
 
 # ── Page config (must be first) ────────────────────────────────────────────────
 st.set_page_config(
@@ -259,115 +256,6 @@ def counter_card(label, end_value, is_float=False, prefix="", suffix="",
     </body></html>"""
     return html
 
-# ── Chatbot helpers ────────────────────────────────────────────────────────────
-@st.cache_data
-def get_dataset_context(_df) -> str:
-    lines = [
-        "You are an expert analyst for the Tokyo 2021 Olympics Medal Efficiency Dashboard.",
-        "You answer questions about Olympic data AND can update dashboard filters/views via commands.",
-        "",
-        "AVAILABLE METRICS:",
-        "  medals_per_athlete         – Medals per Athlete",
-        "  medals_per_million_pop     – Medals per Million Population",
-        "  medals_per_billion_gdp     – Medals per $B GDP",
-        "  weighted_score_per_athlete – Weighted Score per Athlete",
-        "  gold_percentage            – Gold %",
-        "",
-        "FILTER CATEGORIES:",
-        f"  Country sizes: {sorted(_df['country_size_category'].unique().tolist())}",
-        f"  GDP categories: {sorted(_df['gdp_category'].unique().tolist())}",
-        f"  Medal range: {int(_df['total'].min())} – {int(_df['total'].max())}",
-        "",
-        "ALL COUNTRIES (sorted by total medals, format: country: G/S/B=total, athletes, medals/athlete, pop, GDP):",
-    ]
-    for country, row in _df.sort_values("total", ascending=False).iterrows():
-        pop = row["population"]
-        gdp = row["gdp"]
-        if pd.notna(pop):
-            if pop >= 1e9:   pop_str = f"{pop/1e9:.1f}B"
-            elif pop >= 1e6: pop_str = f"{pop/1e6:.1f}M"
-            else:            pop_str = f"{pop/1e3:.0f}K"
-        else:
-            pop_str = "N/A"
-        if pd.notna(gdp):
-            if gdp >= 1e12:  gdp_str = f"${gdp/1e12:.2f}T"
-            elif gdp >= 1e9: gdp_str = f"${gdp/1e9:.1f}B"
-            else:            gdp_str = f"${gdp/1e6:.0f}M"
-        else:
-            gdp_str = "N/A"
-        lines.append(
-            f"  {country}: {int(row['gold'])}G/{int(row['silver'])}S/{int(row['bronze'])}B"
-            f"={int(row['total'])} total, {int(row['athlete_count'])} athletes,"
-            f" {row['medals_per_athlete']:.3f}/athlete,"
-            f" size={row['country_size_category']}, gdp_cat={row['gdp_category']},"
-            f" pop={pop_str}, GDP={gdp_str}"
-        )
-    lines += [
-        "",
-        "RESPONSE FORMAT — always return valid JSON (no markdown fences):",
-        '{"answer": "<natural language response>", "commands": [...]}',
-        "",
-        "AVAILABLE COMMANDS (include only when user asks to filter/focus/compare):",
-        '  {"type": "set_country",          "value": "<country_name>"}',
-        '  {"type": "set_metric",           "value": "<metric_key>"}',
-        '  {"type": "set_size_filter",      "value": ["Small","Medium","Large","Very Large"]}',
-        '  {"type": "set_medal_range",      "value": [min_int, max_int]}',
-        '  {"type": "set_gdp_filter",       "value": ["High Income","Upper Middle Income",...]}',
-        '  {"type": "set_compare_countries","value": ["Country1","Country2"]}',
-        "",
-        "Country names must match exactly as listed above.",
-        "If no dashboard change is needed, return an empty commands array.",
-    ]
-    return "\n".join(lines)
-
-
-def call_claude(messages: list, df_full) -> dict:
-    api_key = os.environ.get("DEEPSEEK_API_KEY") or st.secrets.get("DEEPSEEK_API_KEY", "")
-    if not api_key:
-        return {"answer": "No DEEPSEEK_API_KEY found. Add it to `.streamlit/secrets.toml` or export it in your terminal.", "commands": []}
-    try:
-        client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-        system_text = get_dataset_context(df_full)
-        response = client.chat.completions.create(
-            model="deepseek-reasoner",
-            max_tokens=1024,
-            messages=[{"role": "system", "content": system_text}] + messages,
-        )
-        raw = response.choices[0].message.content.strip()
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            m = re.search(r'\{.*\}', raw, re.DOTALL)
-            if m:
-                return json.loads(m.group())
-            return {"answer": raw, "commands": []}
-    except Exception as e:
-        return {"answer": f"Error calling DeepSeek: {e}", "commands": []}
-
-
-def apply_command(cmd: dict, df_full):
-    t, v = cmd.get("type"), cmd.get("value")
-    if t == "set_country" and v in df_full.index:
-        st.session_state["selected_country"] = v
-    elif t == "set_metric" and v in METRIC_LABELS:
-        st.session_state["selected_metric"] = v
-    elif t == "set_size_filter" and isinstance(v, list):
-        valid = [x for x in v if x in df_full["country_size_category"].unique()]
-        if valid:
-            st.session_state["filter_sizes"] = valid
-    elif t == "set_medal_range" and isinstance(v, list) and len(v) == 2:
-        lo = max(int(df_full["total"].min()), int(v[0]))
-        hi = min(int(df_full["total"].max()), int(v[1]))
-        st.session_state["filter_medals"] = (lo, hi)
-    elif t == "set_gdp_filter" and isinstance(v, list):
-        valid = [x for x in v if x in df_full["gdp_category"].unique()]
-        if valid:
-            st.session_state["filter_gdp"] = valid
-    elif t == "set_compare_countries" and isinstance(v, list):
-        valid = [x for x in v if x in df_full.index]
-        if valid:
-            st.session_state["compare_countries"] = valid[:3]
-
 
 # ── Data loading ───────────────────────────────────────────────────────────────
 @st.cache_data
@@ -436,16 +324,6 @@ if "selected_country" not in st.session_state:
 if "compare_countries" not in st.session_state:
     opts = df_full.index.sort_values().tolist()
     st.session_state["compare_countries"] = opts[:3]
-if "chat_messages" not in st.session_state:
-    st.session_state["chat_messages"] = []
-if "pending_commands" not in st.session_state:
-    st.session_state["pending_commands"] = []
-
-# ── Process any pending dashboard commands from the chatbot ───────────────────
-if st.session_state["pending_commands"]:
-    for cmd in st.session_state["pending_commands"]:
-        apply_command(cmd, df_full)
-    st.session_state["pending_commands"] = []
 
 # ── Sidebar: filters + Lottie trophy ──────────────────────────────────────────
 st.sidebar.title("🎯 Filters")
@@ -477,6 +355,7 @@ selected_gdp = st.sidebar.multiselect(
     options=df_full["gdp_category"].unique(),
     key="filter_gdp",
 )
+
 
 _sizes = st.session_state.get("filter_sizes", selected_sizes)
 _medals = st.session_state.get("filter_medals", medal_range)
@@ -711,7 +590,6 @@ st.markdown(
 # ── Country Deep Dive ──────────────────────────────────────────────────────────
 st.header("🔬 Country Deep Dive")
 country_options = df.index.sort_values().tolist()
-# Guard: if chatbot set a country not in current filter, reset to first available
 if st.session_state.get("selected_country") not in df.index:
     st.session_state["selected_country"] = country_options[0] if country_options else None
 selected_country = st.selectbox(
@@ -922,64 +800,6 @@ st.download_button(
     mime="text/csv",
 )
 
-# ── AI Chatbot ─────────────────────────────────────────────────────────────────
-st.markdown("---")
-st.header("🤖 Ask the Olympics Analyst")
-st.caption(
-    "Ask any question about the Tokyo 2021 data. The assistant can also update "
-    "dashboard filters, focus on a country, or set up a comparison for you."
-)
-
-# Display existing chat history
-for msg in st.session_state["chat_messages"]:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# Chat input (pins to bottom of container)
-user_input = st.chat_input("Ask about medals, efficiency, countries, comparisons…")
-if user_input:
-    # Show user message immediately
-    with st.chat_message("user"):
-        st.markdown(user_input)
-    st.session_state["chat_messages"].append({"role": "user", "content": user_input})
-
-    # Build messages list for API (last 10 turns to avoid bloat)
-    api_messages = [
-        {"role": m["role"], "content": m["content"]}
-        for m in st.session_state["chat_messages"][-10:]
-    ]
-
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking…"):
-            result = call_claude(api_messages, df_full)
-
-    answer = result.get("answer", "Sorry, I couldn't generate a response.")
-    commands = result.get("commands", [])
-
-    # Show assistant answer
-    with st.chat_message("assistant"):
-        st.markdown(answer)
-        if commands:
-            labels = []
-            label_map = {
-                "set_country":           "🔬 Focused on country",
-                "set_metric":            "📊 Changed efficiency metric",
-                "set_size_filter":       "🔽 Updated size filter",
-                "set_medal_range":       "🔽 Updated medal range",
-                "set_gdp_filter":        "🔽 Updated GDP filter",
-                "set_compare_countries": "🆚 Set comparison countries",
-            }
-            for cmd in commands:
-                lbl = label_map.get(cmd.get("type", ""), cmd.get("type", ""))
-                labels.append(lbl)
-            st.caption("Dashboard updated: " + " · ".join(labels))
-
-    st.session_state["chat_messages"].append({"role": "assistant", "content": answer})
-
-    # Queue commands for next render cycle
-    if commands:
-        st.session_state["pending_commands"] = commands
-        st.rerun()
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
