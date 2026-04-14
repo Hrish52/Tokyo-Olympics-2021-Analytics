@@ -41,10 +41,6 @@ Traditional Olympic medal tables reward countries that send the most athletes. T
 - **Country Comparison** — Radar chart comparing 2-3 countries across all efficiency metrics
 - **Medal Treemap** — Hierarchical view colored by efficiency
 - **Downloadable Data** — Export filtered dataset as CSV
-
----
-
----
 ---
 
 ## 🖼️ Dashboard Preview
@@ -54,6 +50,7 @@ Traditional Olympic medal tables reward countries that send the most athletes. T
 ![Traditional vs Efficiency](screenshots/traditional_vs_efficiency.png)
 
 ![Country Deep Dive](screenshots/country_deep_dive.png)
+
 ---
 
 ## 🗂️ Project Structure
