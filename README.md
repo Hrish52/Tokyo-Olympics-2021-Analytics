@@ -44,6 +44,18 @@ Traditional Olympic medal tables reward countries that send the most athletes. T
 
 ---
 
+---
+---
+
+## 🖼️ Dashboard Preview
+
+![Dashboard Overview](screenshots/dashboard_overview.png)
+
+![Traditional vs Efficiency](screenshots/traditional_vs_efficiency.png)
+
+![Country Deep Dive](screenshots/country_deep_dive.png)
+---
+
 ## 🗂️ Project Structure
 
 ```
